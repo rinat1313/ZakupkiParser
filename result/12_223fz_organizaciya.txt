@@ -1,0 +1,76 @@
+12. 223-ФЗ — ОРГАНИЗАЦИЯ (view223)
+==================================
+Источник (НОВЫЙ анализ 2026-08-02):
+  html/223 фз/Регистрационные данные организации учётная карточка 223 фз.html
+  html/223 фз/Регистрационные данные организации дополнительная информация 223 фз.html
+  html/223 фз/Регистрационные данные организации журнал событий 223 фз.html
+
+Образец: agencyId=190768
+ИНН/КПП/ОГРН: 3919003130 / 391901001 / 1023901956517
+
+
+1. URL
+------
+/epz/organization/view223/info.html?agencyId=190768
+также: ?inn=&kpp=&ogrn=
+
+Вкладки:
+  ?tab=info     — учётная карточка
+  ?tab=other    — дополнительная информация
+  ?tab=journal  — журнал (почти всегда через AJAX)
+
+
+2. CSS
+------
+Шапка: registry-entry + badge «223-ФЗ»
+Поля вкладок info/other: как у 44 org —
+  blockInfo / section__title / section__info
+(на карточке ЗАКУПКИ 223 — другие классы; у ОРГАНИЗАЦИИ — смешанный стек)
+
+
+3. tab=info
+-----------
+Блоки: ИКО (часто AJAX), Регистрационные данные, Коды классификации, ИКУ
+
+Поля: полное/сокращённое наименование, даты регистрации и изменения,
+место нахождения, ОКПО, ОКАТО, ОКВЭД, ИКУ + дата присвоения.
+
+AJAX ИКО:
+  /epz/organization/view223/iko-list.html?agencyId=190768&page=&pageSize=
+  → #iko-wrapper
+
+
+4. tab=other
+------------
+Почтовый адрес, сайт, контактное лицо, email, статус («Зарегистрирована»).
+
+
+5. tab=journal
+--------------
+GET /epz/organization/card/event/journal/list.html
+  ?sid=190768&entityId=190768&qualifier=actionHistoryService&page=&pageSize=
+→ #event-journal-wrapper
+
+В статическом HTML строк может не быть — обязателен AJAX.
+
+
+6. СВЯЗИ С ЗАКУПКАМИ
+--------------------
+Из шапки организации:
+  Закупки: extendedsearch fz223=on + customer filters
+  Положение о закупке: /epz/orderclause/card/...?reestrNumber=
+  Договоры: /epz/contractfz223/search/results.html
+
+
+7. БД
+-----
+organization_223:
+  agency_id PK, inn, kpp, ogrn, names, addresses, okpo, okato,
+  okved, iku, status, level, website, contacts, clause_reestr_number
+
+
+8. ОТЛИЧИЕ ОТ 44 ORG
+--------------------
+44: organizationCode / organizationId, URL /view/info.html
+223: agencyId (или inn+kpp+ogrn), URL /view223/info.html
+Маппинг ID заказчика между 44 и 223 — разные пространства; джойнить по ИНН.

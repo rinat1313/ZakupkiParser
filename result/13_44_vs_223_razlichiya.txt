@@ -1,0 +1,36 @@
+13. 44-ФЗ VS 223-ФЗ — РАЗДЕЛЬНЫЕ ПАРСЕРЫ
+=======================================
+Сводка по сравнению html/44 фз/ и html/223 фз/ (анализ 2026-08-02).
+Старые корневые html/*.html не перечитывались; выводы 44-карточки
+согласуются с result/02–06.
+
+
+| Тема              | 44-ФЗ                                      | 223-ФЗ                                      |
+|-------------------|--------------------------------------------|---------------------------------------------|
+| URL извещения     | /epz/order/notice/{type}/view/... (ea20…)  | /epz/order/notice/notice223/...             |
+| Номер             | ~19 цифр (regNumber)                       | короче; + обязательный noticeGuid (UUID)    |
+| Шапка карточки    | .cardMainInfo                              | .registry-entry__*                          |
+| Поля карточки     | .section__title / .section__info           | .common-text__title / .common-text__value   |
+| Filestore         | /44fz/filestore/.../priz/                  | /223/filestore/.../fz223/                   |
+| Организация       | /organization/view/info.html?organizationCode= | /organization/view223/...?agencyId=     |
+| Договоры/контракты| /epz/contract/...                          | /epz/contractfz223/...                      |
+| Термины           | контракт, НМЦК                             | договор, начальная цена договора            |
+| Лоты              | объект в таблице на common-info            | отдельная вкладка lot-list + lotGuid        |
+| Итоги             | supplier-results (опционально)             | protocols + contract-info                   |
+
+
+ПРАВИЛО ДЛЯ КОДА
+----------------
+Два независимых парсера за общим интерфейсом (ParseNotice, ParseDocs, …).
+Общий слой: HTTP client, rate limit, storage, нормализация денег/дат.
+Не шарить CSS-селекторы между 44 и 223.
+
+
+ПОРЯДОК ОБОГАЩЕНИЯ
+-----------------
+44: search → common-info (или printForm XML) → documents → events
+    → (если есть) supplier-results → organization по organizationCode
+
+223: search fz223 → common-info (number+guid) → lots → documents
+    → changes → protocols/contracts (AJAX) → events
+    → organization view223 по agencyId или ИНН

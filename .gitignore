@@ -1,0 +1,28 @@
+# OS / IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
+
+# Go
+DataCode/bin/
+DataCode/dist/
+*.exe
+*.test
+*.out
+vendor/
+
+# Curl smoke-test downloads
+DataCode/scripts/eis_curl/out/*
+!DataCode/scripts/eis_curl/out/.gitignore
+
+# Env / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Local scratch
+tmp/
+*.bin

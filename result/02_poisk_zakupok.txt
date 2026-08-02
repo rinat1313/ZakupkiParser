@@ -1,0 +1,118 @@
+02. ПОИСК ЗАКУПОК / ТЕНДЕРОВ
+============================
+Образец: html/Закупки.html
+Вход с главной: html/Главная ЕИС в сфере закупок.html
+
+
+1. БАЗОВЫЙ URL РЕЗУЛЬТАТОВ
+-------------------------
+https://zakupki.gov.ru/epz/order/extendedsearch/results.html
+
+Форма на главной (#quickSearchForm_header) через JS уходит на этот URL.
+Для парсера вызывать results.html НАПРЯМУЮ (не ждать JS на home.html).
+
+
+2. ОСНОВНЫЕ QUERY-ПАРАМЕТРЫ
+---------------------------
+searchString=...     — текст / номер / ИНН / часть названия
+morphology=on        — морфология (по умолчанию часто включена)
+strictEqual=true     — точное совпадение (удобно для поиска по номеру)
+fz44=on              — закон 44-ФЗ
+fz223=on             — закон 223-ФЗ
+ppRf615=on           — ПП РФ 615
+
+Этапы закупки (#orderStages):
+  af=on  — Подача заявок
+  ca=on  — Работа комиссии
+  pc=on  — Закупка завершена
+  pa=on  — Закупка отменена
+
+Сортировка / пагинация:
+  sortBy=UPDATE_DATE | PUBLISH_DATE | PRICE | RELEVANCE
+  sortDirection=false
+  pageNumber=1
+  recordsPerPage=_10
+
+Пример поиска по номеру (строго):
+  .../results.html?searchString=0134300097526000797&strictEqual=true&fz44=on
+
+Пример по ключевым словам (как в образце «программы»):
+  .../results.html?searchString=программы&fz44=on&fz223=on&af=on&...
+
+
+3. СТРУКТУРА КАРТОЧКИ В ЛЕНТЕ
+----------------------------
+Контейнер списка:  .search-registry-entrys-block
+Одна закупка:      .search-registry-entry-block
+  .registry-entry__header-top__title   — «44-ФЗ Электронный аукцион»
+  .registry-entry__header-mid__number a — № и ССЫЛКА на извещение
+  .registry-entry__header-mid__title   — статус («Подача заявок»)
+  .registry-entry__body-title / __body-value — объект / организация
+  .price-block__title / __value        — «Начальная цена» + сумма
+  .data-block__title / __value         — Размещено / Обновлено / Окончание подачи
+  .href-block                          — доп. ссылки (часто скрыты классом d-none)
+
+
+4. ЧТО ЗАБИРАТЬ ИЗ ПОИСКА В БД (МИНИМУМ)
+---------------------------------------
+- regNumber (из текста ссылки / URL)
+- law (44/223) и способ закупки
+- status
+- object_title
+- price_raw (НМЦК из списка, если есть)
+- org_name + organizationCode из href организации
+- dates: published, updated, application_end
+- notice_url — ПОЛНЫЙ href из <a> (не придумывать путь!)
+- source_html_fetched_at
+
+
+5. URL ИЗВЕЩЕНИЯ ИЗ РЕЗУЛЬТАТОВ (ВАЖНО)
+-------------------------------------
+44-ФЗ электронный аукцион (образец):
+  /epz/order/notice/ea20/view/common-info.html?regNumber=0134300097526000797
+
+Другие типы 44-ФЗ (встречаются в ленте):
+  ok20  — открытый конкурс
+  eap20 / okp20 — варианты путей к documents в ярлыках поиска
+  и др.
+
+223-ФЗ — ДРУГОЕ дерево:
+  https://zakupki.gov.ru/223/purchase/public/purchase/info/common-info.html?regNumber=...
+  документы: /epz/order/notice/notice223/documents.html?purchaseNoticeNumber=...&noticeGuid=...
+
+Правило: всегда копировать href из ленты. Не собирать URL «из головы».
+
+
+6. ДОП. ССЫЛКИ ИЗ КАРТОЧКИ ПОИСКА
+--------------------------------
+Контракты по номеру заказа:
+  /epz/contract/search/results.html?orderNumber={regNumber}&fz44=on&...
+
+План-график по ИКЗ:
+  /epz/orderplan/search/results.html?fz44=on&pgzIKZInputNameYear=...
+
+RSS поиска:
+  /epz/order/extendedsearch/rss.html?searchString=...
+
+Экспорт CSV (в UI): downloadCsv('?searchString=...', 'totalCount')
+
+
+7. ПРАКТИКА ПОИСКА ПОД ПРОДУКТ
+------------------------------
+Сценарий A — пользователь ищет по ключевым словам / региону:
+  results.html + фильтры fz44/fz223 + stages + pageNumber.
+
+Сценарий B — запрос по номеру закупки:
+  results.html?searchString={номер}&strictEqual=true
+  ИЛИ сразу common-info / viewXml, если номер уже известен.
+
+Сценарий C — мониторинг ленты:
+  кэш 5 минут, пагинация, дедуп по regNumber.
+
+
+8. ЛОВУШКИ ПОИСКА
+-----------------
+- По умолчанию могут быть включены и 44, и 223 — фильтруйте явно.
+- Подсветка совпадений: <span class='highlightColor'> внутри текста.
+- Скрытые блоки .d-none всё равно в DOM — не путать с отсутствием данных.
+- Огромный header/footer — парсить только .search-registry-entrys-block.

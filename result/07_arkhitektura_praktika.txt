@@ -1,0 +1,124 @@
+07. АРХИТЕКТУРА, ПРАКТИКА, ЛОВУШКИ
+=================================
+Сводка по over/info.txt + анализу html/ под будущую СУБД и парсер.
+
+
+1. ЦЕЛЕВОЙ PIPELINE
+-------------------
+[Search worker]  → очередь →  [Notice enricher]  →  [Documents downloader]
+      │                           │                         │
+      ▼                           ▼                         ▼
+ notices_raw              notices + nmck              files blob + meta
+ (карточки ленты)         customers aliases           в storage + БД
+
+Опционально: Event journal worker, Contract enricher (когда статус позволяет).
+
+
+2. РЕКОМЕНДУЕМЫЕ ТАБЛИЦЫ (МИНИМУМ)
+---------------------------------
+notices
+  reg_number PK, law, procedure_type, status, object_title,
+  nmck, currency, published_at, updated_at, application_end_at,
+  ikz, etp_name, etp_url, organization_code, source_url,
+  raw_html_path, raw_xml_path, fetched_at
+
+lots / purchase_objects
+  id, reg_number FK, okpd2, name, unit, qty, unit_price, amount
+
+customers
+  inn PK, name, kpp, region, ...
+
+customer_id_aliases
+  alias_type (inn|organizationId|organizationCode), alias_value, inn FK
+  (+ Redis-кэш тех же ключей с версией v2:)
+
+documents
+  id, reg_number FK, uid, filename, group_title, url,
+  sha256, size, storage_key, placed_at, edition_status, downloaded_at
+
+notice_events
+  id, reg_number FK, event_at, event_text, content_hash
+
+contracts (позже)
+  reestr_number, order_number, price, signed_at, ...
+
+
+3. RATE LIMIT И УСТОЙЧИВОСТЬ (ЭМПИРИКА ИЗ over/)
+-----------------------------------------------
+Официальных лимитов нет. Наблюдения:
+  ~8 req/s  — комфортно
+  ~15 req/s — иногда 429
+  ~30 req/s — часто 429 (~30%)
+
+Практика:
+  - ≤ 3 параллельных запроса на тяжёлое обогащение
+  - timeout ~15s
+  - retry 3 раза с exponential backoff (1s, 2s, 4s)
+  - пустой body (Varnish) = ошибка → retry
+  - 429 → backoff и снижение concurrency
+
+
+4. КЭШ (РАЗНЫЕ TTL)
+-------------------
+Лента поиска              — 5 минут
+Карточка извещения        — 1 сутки
+Акты / document-info      — 1 неделя
+НМЦК с извещения          — 90 дней
+Mapping ИНН↔org*          — 30 дней
+Negative cache (404/пусто)— 1 час … 1 сутки
+
+Без negative cache лента быстро упирается в 429.
+
+
+5. СТРОГИЕ ПРАВИЛА ПАРСИНГА ДЕНЕГ
+--------------------------------
+- Только канонический label НМЦК.
+- Иначе NULL (лучше, чем неверное число в формулах).
+- Anti-outlier для дисконта: отбрасывать discount ≥ 80%
+  (часто рамочник или ошибка парсинга).
+
+
+6. ЧАСТЫЕ ЛОВУШКИ
+-----------------
+1. Хардкод ea20/ea44 — ломается на ok20 и др. Берите href из поиска.
+2. Один парсер на 44 и 223 — не сработает.
+3. Джойн по «любому числу из URL» без маппинга к ИНН.
+4. Путать заказчика и организацию размещения (уполномоченный орган).
+5. Толерантный парсинг цен по синонимам.
+6. Один TTL на все типы страниц.
+7. >3–5 параллельных запросов к ЕИС.
+8. Считать «Информация отсутствует» ошибкой.
+9. Парсить весь HTML с шапкой — шум и ложные совпадения.
+10. Вёрстка ЕИС меняется раз в несколько месяцев → нужны смоук-тесты
+    на известных regNumber из html/.
+
+
+7. МОНИТОРИНГ ПАРСЕРА
+---------------------
+CI / периодический прогон:
+  - зафиксированные HTML-фикстуры из папки html/
+  - живые запросы к 2–3 известным извещениям
+  - проверка: нашлись regNumber, НМЦК (или NULL осознанно), ≥1 filestore uid
+
+
+8. ПРИОРИТЕТ РЕАЛИЗАЦИИ (ПРАКТИЧНЫЙ ПЛАН)
+----------------------------------------
+Этап 1: поиск results.html → сохранение списка notices
+Этап 2: enrich по regNumber (viewXml + common-info)
+Этап 3: documents + filestore download
+Этап 4: aliases заказчика + event-journal
+Этап 5: контракты / акты (для истории заказчика)
+Этап 6 (опц.): getDocsIP bulk / SOAP при появлении доступа
+
+
+9. ИСТОЧНИКИ ЭТОГО РУКОВОДСТВА
+------------------------------
+html/Главная ЕИС в сфере закупок.html
+html/Закупки.html
+html/Сведения закупки.html
+html/Сведения закупки документы.html
+html/Сведения закупки журнал событий.html
+over/info.txt
+over/api - Как получить информацию о закупке... (Stack Overflow)
+over/Локальный инструмент для поиска закупок ЕИС... (Хабр / getDocsIP)
+over/Извлечение открытых данных сайта zakupki.gov.ru с помощью СУБД BaseX (Хабр; FTP устарел)

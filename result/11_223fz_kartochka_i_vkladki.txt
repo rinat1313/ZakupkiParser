@@ -1,0 +1,112 @@
+11. 223-ФЗ — КАРТОЧКА ЗАКУПКИ И ВКЛАДКИ
+=======================================
+Источник (НОВЫЙ анализ 2026-08-02): все файлы html/223 фз/ про карточку закупки.
+Образец: purchaseNoticeNumber / regNumber = 32616257756
+         noticeGuid = ddfc7c5e-bfbd-463a-894e-4f0f85263e27
+
+Корневые html/*.html (44-ФЗ) НЕ перечитывались.
+Это ОТДЕЛЬНОЕ дерево URL и CSS от 44-ФЗ — нужен отдельный парсер.
+
+
+1. БАЗОВЫЙ ПУТЬ (АКТУАЛЬНО ПО ОБРАЗЦАМ)
+--------------------------------------
+Домен: https://zakupki.gov.ru
+Префикс карточки: /epz/order/notice/notice223/
+
+ВНИМАНИЕ: в старом result/06 упоминался legacy
+  /223/purchase/public/purchase/info/...
+В новых образцах карточка живёт в notice223. Путь /223/ — в основном filestore.
+
+
+2. НАВИГАЦИЯ ВКЛАДОК
+--------------------
+common-info.html?noticeGuid={G}&regNumber={N}
+lot-list.html?purchaseNoticeNumber={N}&noticeGuid={G}
+  → lot/lot-info.html?lotGuid={L}&purchaseNoticeGuid={G}&purchaseNoticeNumber={N}
+documents.html?purchaseNoticeNumber={N}&noticeGuid={G}
+changes-and-explanations.html?purchaseNoticeNumber={N}&noticeGuid={G}
+protocols.html?purchaseNoticeNumber={N}
+contract-info.html?purchaseNoticeNumber={N}
+  → AJAX contract-info-list.html
+event-journal.html?purchaseNoticeNumber={N}
+
+Синонимы параметров (нормализовать в коде):
+  regNumber ↔ purchaseNoticeNumber
+  noticeGuid ↔ purchaseNoticeGuid
+
+
+3. ОБЩАЯ ИНФОРМАЦИЯ (Карточка закупки 223 фз.html)
+--------------------------------------------------
+Шапка — как в поиске, НЕ cardMainInfo:
+  .search-registry-entry-block / .registry-entry__*
+  .price-block__value, .data-block__*
+
+Тело полей:
+  .card-common .common-text__caption
+  .common-text__title + .common-text__value
+  ИНН: .common-text__value--gray + соседний .common-text__value
+
+Ключевые поля:
+  Реестровый номер извещения, способ закупки, наименование, редакция
+  Даты размещения / текущей редакции
+  Заказчик (ссылка view223?inn&kpp&ogrn), ИНН/КПП/ОГРН, адреса
+  Требования к участникам, контакты, предоставление документации
+
+Связанные ссылки: план, договоры contractfz223, жалобы, RSS, printForm.
+
+
+4. СПИСОК ЛОТОВ
+---------------
+Таблица .table: номер/наименование, централизованная закупка,
+сведения о цене договора, ОКПД2, ОКВЭД2.
+lotGuid в href на lot-info.
+AJAX: criterion-list.html?lotGuid=, sub-lot-list.html?noticeGuid=
+
+
+5. ДОКУМЕНТЫ
+------------
+section.card-attachments → .card-attachments__block → .title
+
+Скачивание (НЕ 44fz!):
+  https://zakupki.gov.ru/223/filestore/public/1.0/download/fz223/file.html?uid={UID}
+
+Также: documentGuid, entityGuid (= noticeGuid) для signview.
+Пустые блоки: «Сведения отсутствуют» — не ошибка.
+
+
+6. ИЗМЕНЕНИЯ И РАЗЪЯСНЕНИЯ
+-------------------------
+Таблица документов: наименование, редакция, статус, размещено.
+Часто много пустых групп.
+
+
+7. ПРОТОКОЛЫ / ДОГОВОРЫ
+----------------------
+protocols.html — в образце блок «Иной протокол» пуст (закупка у ед. поставщика).
+contract-info.html — «Реестр договоров» пуст в сохранённом HTML;
+  на live: GET .../contract-info-list.html?purchaseNoticeNumber=
+
+
+8. ЖУРНАЛ СОБЫТИЙ ЗАКУПКИ
+-------------------------
+table#event.displaytagTable
+Дата/время + текст (смена этапа, размещение извещения).
+Часовой пояс может быть без пробела: 15:53(МСК-1).
+В журнале «организация, разместившая сведения» может ≠ заказчик.
+
+
+9. МИНИМУМ В БД (223)
+---------------------
+notice_223: number, guid, method, status, object, price, dates, customer ids
+lot_223: lot_guid, number, name, nmck, okpd2, okved2, delivery
+document_223: uid, document_guid, block, filename, url, revision
+event_223: at, text
+
+
+10. ЛОВУШКИ
+-----------
+- Не использовать селекторы cardMainInfo / section__title на карточке 223.
+- Filestore /223/... — отдельный downloader.
+- Часть вкладок без GUID в query — GUID хранить с common-info.
+- Header «Иной способ» vs body «Закупка у единственного поставщика» — оба поля.
+- Термины: договор (не контракт), начальная цена договора.

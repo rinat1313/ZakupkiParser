@@ -1,0 +1,22 @@
+14. ТЕСТОВЫЕ CURL К ЕИС
+=======================
+Рабочие скрипты для запуска из IDE:
+
+  DataCode/scripts/eis_curl/README.txt
+  DataCode/scripts/eis_curl/run_all.sh
+  DataCode/scripts/eis_curl/01_home.sh … 07_download_file.sh
+
+Вывод сохраняется в DataCode/scripts/eis_curl/out/
+
+Быстрый старт из корня проекта:
+
+  bash DataCode/scripts/eis_curl/run_all.sh
+
+Или один запрос:
+
+  bash DataCode/scripts/eis_curl/02_notice44.sh
+
+Особенности (проверено 2026-08-02):
+  - нужен curl -k (SSL: unable to get local issuer certificate)
+  - не использовать имя переменной UID в zsh
+  - документы: сначала 06_documents_list.sh, потом 07_download_file.sh

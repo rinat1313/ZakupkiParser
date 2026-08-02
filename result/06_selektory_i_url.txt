@@ -1,0 +1,133 @@
+06. ШПАРГАЛКА: URL И CSS-СЕЛЕКТОРЫ
+==================================
+Собрано из html/ (образец № 0134300097526000797) и over/.
+
+
+1. URL (ДОМЕН https://zakupki.gov.ru)
+-------------------------------------
+
+Главная:
+  /epz/main/public/home.html
+
+Поиск закупок:
+  /epz/order/extendedsearch/results.html?searchString=...&fz44=on&...
+  /epz/order/extendedsearch/rss.html?searchString=...
+
+Извещение 44-ФЗ (тип ea20 — из образца; другие типы брать из href):
+  /epz/order/notice/ea20/view/common-info.html?regNumber={N}
+  /epz/order/notice/ea20/view/documents.html?regNumber={N}
+  /epz/order/notice/ea20/view/event-journal.html?regNumber={N}
+
+PrintForm / XML / RSS:
+  /epz/order/notice/printForm/viewXml.html?regNumber={N}
+  /epz/order/notice/printForm/view.html?regNumber={N}
+  /epz/order/notice/printForm/viewByVersionNumber.html?regNumber={N}&versionNumber=1&qualifier=regNumberAndVersion
+  /epz/order/notice/rss?regNumber={N}
+
+Организация:
+  /epz/organization/view/info.html?organizationCode={CODE}
+
+Filestore (скачивание):
+  /44fz/filestore/public/1.0/download/priz/file.html?uid={UID}
+
+Контракты:
+  /epz/contract/search/results.html?orderNumber={N}&fz44=on
+  /epz/contract/contractCard/common-info.html?reestrNumber={Y}
+  /epz/contract/contractCard/document-info.html?reestrNumber={Y}
+
+223-ФЗ (актуально по html/223 фз/ — анализ 2026-08-02):
+  /epz/order/notice/notice223/common-info.html?noticeGuid={G}&regNumber={N}
+  /epz/order/notice/notice223/lot-list.html?purchaseNoticeNumber={N}&noticeGuid={G}
+  /epz/order/notice/notice223/documents.html?purchaseNoticeNumber={N}&noticeGuid={G}
+  /epz/order/notice/notice223/changes-and-explanations.html?...
+  /epz/order/notice/notice223/protocols.html?purchaseNoticeNumber={N}
+  /epz/order/notice/notice223/contract-info.html?purchaseNoticeNumber={N}
+  /epz/order/notice/notice223/event-journal.html?purchaseNoticeNumber={N}
+  Filestore: /223/filestore/public/1.0/download/fz223/file.html?uid={UID}
+  Org: /epz/organization/view223/info.html?agencyId={A}
+  LEGACY (в старых заметках, в новых образцах карточки не найден):
+  /223/purchase/public/purchase/info/common-info.html — не использовать как основной
+
+44-ФЗ доп. (новые образцы html/44 фз/):
+  /epz/order/notice/ea20/view/supplier-results.html?regNumber={N}
+  /epz/organization/view/info.html?organizationCode={C}&tab=info|other
+
+
+2. CSS / СТРУКТУРА — ПОИСК
+--------------------------
+.search-registry-entrys-block
+.search-registry-entry-block
+.registry-entry__header-top__title
+.registry-entry__header-mid__number a[href]
+.registry-entry__header-mid__title
+.registry-entry__body-title
+.registry-entry__body-value
+.price-block__title
+.price-block__value
+.data-block__title
+.data-block__value
+
+
+3. CSS / СТРУКТУРА — КАРТОЧКА
+----------------------------
+body.cardLayout
+.cardWrapper
+.cardMainInfo
+.cardMainInfo__title
+.cardMainInfo__purchaseLink a
+.cardMainInfo__state
+.cardMainInfo__content
+.cardMainInfo__content.cost
+.tabsNav__item[href]
+
+.blockInfo__title
+.blockInfo__section .section__title
+.blockInfo__section .section__info
+
+#positionKTRU
+#purchaseObjectTruTable1 table.tableBlock
+.truInfo_*   (скрытые характеристики)
+
+
+4. CSS / СТРУКТУРА — ДОКУМЕНТЫ
+-----------------------------
+.notice-documents .docName
+.blockFilesTabDocs .attachment a[href*="filestore"][href*="uid="]
+a[href*="signview"][href*="uid="]
+#revisionViewToggle
+
+
+5. CSS / СТРУКТУРА — ЖУРНАЛ
+--------------------------
+#event-journal-wrapper
+table#event.displaytagTable
+tr.table__row td.table__cell
+
+
+6. CSS 223-ФЗ (КАРТОЧКА) — НЕ ПУТАТЬ С 44
+----------------------------------------
+Шапка: .registry-entry__header-mid__number a, .registry-entry__header-mid__title
+Поля:  .card-common .common-text__caption / .common-text__title / .common-text__value
+Доки:  section.card-attachments a[href*="/223/filestore/"][href*="uid="]
+Лоты:  a[href*="lot-info.html"][href*="lotGuid="]
+Журнал: table#event tr.table__row td.table__cell
+
+
+7. CSS 44-ФЗ — ОРГАНИЗАЦИЯ И ИТОГИ
+----------------------------------
+Org: #tab-info, #tab-other, .blockInfo__section .section__title/.section__info
+Итоги: a[href*="supplier-results.html"]
+       #supplier-def-result-participant-table-
+       a[href*="protocol-main-info.html"]
+
+
+8. ПРАВИЛА ИЗВЛЕЧЕНИЯ
+--------------------
+- 44 карточка закупки: пара (section__title → section__info), не nth-child.
+- 223 карточка закупки: пара (common-text__title → common-text__value).
+- Цены: убрать неразрывные пробелы, ₽ / &#8381; / «Российский рубль».
+- Даты: сохранить суффикс таймзоны (МСК±N); у 223 бывает без пробела.
+- Номер: вырезать «№» и пробелы из текста ссылки.
+- Scope: .cardWrapper / .card-common / .search-registry-entry-block
+  (не весь документ с шапкой/подвалом).
+- Подробности: result/09–13 и DataCode/html_map/.

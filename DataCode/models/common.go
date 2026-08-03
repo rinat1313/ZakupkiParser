@@ -20,8 +20,9 @@ type Dated struct {
 type Law string
 
 const (
-	Law44  Law = "44"
-	Law223 Law = "223"
+	Law44       Law = "44"
+	Law223      Law = "223"
+	LawPricereq Law = "pricereq" // запросы цен /epz/pricereq (не извещение)
 )
 
 // DocumentFile — вложение filestore.

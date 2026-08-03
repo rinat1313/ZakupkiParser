@@ -24,7 +24,7 @@
 │   └── 223 фз/     # карточка, лоты, документы, организация 223-ФЗ
 ├── over/           # опыт других (статьи, заметки по парсингу)
 ├── result/         # руководства по парсингу (txt)
-├── DataCode/       # заготовка Go-парсера: models, html_map, curl-тесты
+├── DataCode/       # ВЕСЬ код Go-парсера и data/tenders.csv — только здесь
 ├── TASK.txt        # текущее задание
 └── cursor/rules/   # правила для AI-агента
 ```
@@ -51,8 +51,20 @@ DataCode/
   models/           # структуры Notice44, Notice223, Organization, Document…
   html_map/         # где в HTML лежат поля
   docs/             # как работать со структурами
+  internal/parser/  # парсеры fz44 (и позже fz223)
+  pkg/eis/          # HTTP-клиент
+  cmd/parser/       # CLI
+  data/tenders.csv  # входной список номеров извещений
   AI_AGENT.txt      # краткий контекст для AI при разработке
   scripts/eis_curl/ # smoke-тесты curl к живому сайту
+```
+
+### Запуск парсера
+
+```bash
+cd DataCode
+go run ./cmd/parser -limit 1
+go run ./cmd/parser -csv data/tenders.csv -o data/out.json
 ```
 
 ### Проверка доступа к ЕИС

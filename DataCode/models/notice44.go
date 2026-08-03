@@ -16,6 +16,8 @@ type Notice44 struct {
 
 	CustomerName         string `json:"customer_name"`
 	OrganizationCode     string `json:"organization_code"`
+	CustomerINN          string `json:"customer_inn,omitempty"` // с карточки org (добор)
+	CustomerKPP          string `json:"customer_kpp,omitempty"`
 	PlacerIsAuthBody     bool   `json:"placer_is_auth_body"` // уполномоченный орган vs заказчик
 	ETPName              string `json:"etp_name"`
 	ETPURL               string `json:"etp_url"`

@@ -21,6 +21,10 @@ models — только данные (DTO). Без HTTP и без goquery.
 223 event-journal  → []NoticeEvent
 223 organization   → Organization223
 
+pricereq common-info / search → PriceRequest (+ []PriceRequestItem)
+pricereq docs                  → DocumentFile (filestore, как 44)
+pricereq organization          → Organization44 (тот же /epz/organization/)
+
 
 3. НОРМАЛИЗАЦИЯ
 ---------------
@@ -47,5 +51,6 @@ ID: TrimSpace; убрать префикс «№».
 -----------------
 internal/parser/fz44/parse_notice.go    — goquery → Notice44
 internal/parser/fz223/parse_notice.go   — goquery → Notice223
+internal/parser/pricereq/notice.go      — goquery → PriceRequest
 pkg/eis/client.go                       — GET + retry
 cmd/parser/main.go                      — CLI: файл/URL → JSON

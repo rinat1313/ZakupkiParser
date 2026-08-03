@@ -1,46 +1,69 @@
-DataCode — заготовка под разработку парсера на Go
-==================================================
-Создано по TASK.txt (2026-08-02).
+DataCode — код и рабочие данные парсера на Go
+==============================================
+Весь код проекта пишется ТОЛЬКО здесь.
 Полные руководства по парсингу — в ../result/
-Образцы HTML — в ../html/ (не изменять).
+Образцы HTML (только чтение) — в ../html/ (не изменять).
 
 
 СТРУКТУРА
 ---------
 DataCode/
   README.txt              — этот файл
-  AI_AGENT.txt            — краткая инструкция для AI-агента при написании Go-кода
-  go.mod                  — модуль (заготовка)
-  models/                 — структуры данных для парсинга / БД
-    notice44.go
-    notice223.go
-    organization.go
-    document.go
-    common.go
-  html_map/               — где в HTML лежат нужные поля
-    map_44.txt
-    map_223.txt
-  docs/
-    structs_usage.txt     — как работать со структурами
-  internal/parser/        — сюда класть реализацию парсеров (пока пусто)
-  pkg/eis/                — общий HTTP/клиент ЕИС (пока пусто)
-  cmd/parser/             — entrypoint CLI (пока пусто)
-  scripts/eis_curl/       — тестовые curl к ЕИС (запуск из IDE)
+  AI_AGENT.txt            — краткая инструкция для AI-агента
+  go.mod / go.sum         — модуль eisparser
+  models/                 — структуры данных
+  html_map/               — где в HTML лежат поля
+  docs/                   — как работать со структурами
+  internal/
+    parser/fz44/          — парсер извещений 44-ФЗ
+    parser/fz223/         — парсер извещений 223-ФЗ
+    parser/pricereq/      — парсер «Запросы цен» (/epz/pricereq)
+    csvinput/             — чтение data/tenders*.csv
+    store/                — выгрузка в result/{id}/
+    extract/              — LibreOffice / pdftotext → .txt
+    textutil/             — деньги, даты, нормализация текста
+  pkg/eis/                — HTTP-клиент ЕИС
+  cmd/parser/             — CLI: CSV → парсинг → result/
+  cmd/extract/            — пересборка .txt из уже скачанных files/
+  data/
+    tenders.csv           — общий список (44+223+pricereq, law авто)
+    tenders_223.csv       — опционально только 223
+    README.txt
+  scripts/eis_curl/       — smoke curl к живому сайту
 
 
-С ЧЕГО НАЧАТЬ РАЗРАБОТКУ
-------------------------
-0. Проверить доступ к ЕИС:
-     bash DataCode/scripts/eis_curl/run_all.sh
-   или один запрос: bash DataCode/scripts/eis_curl/02_notice44.sh
-1. Прочитать AI_AGENT.txt и result/13_44_vs_223_razlichiya.txt
-2. Реализовать internal/parser/parser44 и parser223 отдельно
-3. Маппить HTML → models/* → СУБД
-4. Фикстуры брать из html/44 фз/ и html/223 фз/
+С ЧЕГО НАЧАТЬ
+-------------
+cd DataCode
+
+# curl-тесты
+bash scripts/eis_curl/02_notice44.sh
+bash scripts/eis_curl/03_notice223.sh
+
+# парсер (смешанный CSV 44+223, автодетект закона → result/{id}/)
+go run ./cmd/parser
+go run ./cmd/parser -csv data/tenders.csv
+go run ./cmd/parser -law auto -limit 1
+
+# принудительно один закон
+go run ./cmd/parser -law 44 -csv data/tenders.csv
+go run ./cmd/parser -law 223 -csv data/tenders_223.csv
+
+# только текст из уже скачанных файлов (LibreOffice + OCR для сканов):
+go run ./cmd/extract
+go run ./cmd/extract -id 32312323655
+# нечитаемые PDF/сканы → result/failed_texts.json и result/{id}/failed_texts.json
+
+go run ./cmd/parser -fixture "../html/44 фз/Сведения закупки 44 фз.html"
+go run ./cmd/parser -law 223 -fixture "../html/223 фз/Карточка закупки 223 фз.html"
+
+go test ./internal/parser/fz44/ ./internal/parser/fz223/ ./internal/extract/ ./internal/detect/
+
 
 
 НЕ ДЕЛАТЬ
 ---------
+- Писать Go/код вне DataCode/
 - Один парсер на 44 и 223 с общими CSS-селекторами
 - Менять файлы в html/ и over/
 - Хардкодить только ea20 — брать href из поиска

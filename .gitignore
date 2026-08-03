@@ -17,6 +17,11 @@ vendor/
 DataCode/scripts/eis_curl/out/*
 !DataCode/scripts/eis_curl/out/.gitignore
 
+# Parser output
+DataCode/data/out.json
+DataCode/data/*.bin
+DataCode/result/
+
 # Env / secrets
 .env
 .env.*

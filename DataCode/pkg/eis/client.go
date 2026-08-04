@@ -221,6 +221,25 @@ func PriceReqDocumentsURL(base, reestrNumber string) string {
 		strings.TrimRight(base, "/"), reestrNumber)
 }
 
+// PriceReqDocumentsURLByInfoID — документы по priceRequestInfoId / priceRequestId.
+func PriceReqDocumentsURLByInfoID(base, infoID string) string {
+	if base == "" {
+		base = BaseURL
+	}
+	id := strings.TrimSpace(infoID)
+	return fmt.Sprintf("%s/epz/pricereq/card/docs.html?priceRequestInfoId=%s",
+		strings.TrimRight(base, "/"), id)
+}
+
+// PriceReqDocumentsURLByRequestID — вариант с priceRequestId (как в карточках UI ЕИС).
+func PriceReqDocumentsURLByRequestID(base, requestID string) string {
+	if base == "" {
+		base = BaseURL
+	}
+	return fmt.Sprintf("%s/epz/pricereq/card/docs.html?priceRequestId=%s",
+		strings.TrimRight(base, "/"), strings.TrimSpace(requestID))
+}
+
 // SearchPricereqURL — поиск в реестре «Запросы цен».
 func SearchPricereqURL(base, reestrNumber string) string {
 	if base == "" {

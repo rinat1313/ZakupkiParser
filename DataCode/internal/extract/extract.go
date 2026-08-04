@@ -248,7 +248,8 @@ func convertLibreOffice(sourcePath, finalTxtPath, ext string) error {
 	wantExt := ".txt"
 	switch ext {
 	case ".xls", ".xlsx", ".ods":
-		filter = "csv"
+		// Явный фильтр Calc: без calc-пакета LO пишет 0 файлов.
+		filter = `csv:Text - txt - csv (StarCalc)`
 		wantExt = ".csv"
 	}
 
@@ -271,22 +272,38 @@ func convertLibreOffice(sourcePath, finalTxtPath, ext string) error {
 		return fmt.Errorf("soffice: %v (%s)", err, strings.TrimSpace(buf.String()))
 	}
 
-	produced := filepath.Join(outDir, "input"+wantExt)
-	if _, err := os.Stat(produced); err != nil {
-		entries, _ := os.ReadDir(outDir)
-		for _, e := range entries {
-			if !e.IsDir() {
-				produced = filepath.Join(outDir, e.Name())
-				break
-			}
-		}
-	}
-	data, err := os.ReadFile(produced)
+	data, err := readConvertedOutput(outDir, "input"+wantExt, wantExt)
 	if err != nil {
-		return fmt.Errorf("read converted: %w; soffice out: %s", err, buf.String())
+		return fmt.Errorf("%w; soffice out: %s", err, strings.TrimSpace(buf.String()))
 	}
 	data = bytes.TrimPrefix(data, []byte{0xEF, 0xBB, 0xBF})
 	return os.WriteFile(finalTxtPath, data, 0o644)
+}
+
+func readConvertedOutput(outDir, preferred, wantExt string) ([]byte, error) {
+	if st, err := os.Stat(preferred); err == nil && !st.IsDir() && st.Size() > 0 {
+		return os.ReadFile(preferred)
+	}
+	var parts [][]byte
+	_ = filepath.WalkDir(outDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		ext := strings.ToLower(filepath.Ext(d.Name()))
+		if wantExt != "" && ext != wantExt && ext != ".txt" && ext != ".csv" {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil || len(bytes.TrimSpace(b)) == 0 {
+			return nil
+		}
+		parts = append(parts, b)
+		return nil
+	})
+	if len(parts) == 0 {
+		return nil, fmt.Errorf("read converted: no output in %s (expected %s)", outDir, preferred)
+	}
+	return bytes.Join(parts, []byte("\n\n")), nil
 }
 
 // Dir обходит originDir и пишет .txt в validDocDir с той же относительной структурой.

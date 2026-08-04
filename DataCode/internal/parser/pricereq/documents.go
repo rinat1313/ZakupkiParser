@@ -1,4 +1,4 @@
-package fz44
+package pricereq
 
 import (
 	"bytes"
@@ -14,31 +14,28 @@ import (
 	"eisparser/models"
 )
 
-// ParseDocumentsHTML извлекает уникальные вложения filestore со вкладки «Документы».
+// ParseDocumentsHTML — вложения вкладки документов запроса цен.
+// Логика шире, чем у 44-ФЗ: часть ссылок filestore без сегмента /download/.
 func ParseDocumentsHTML(html []byte) ([]models.DocumentFile, error) {
 	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(html))
 	if err != nil {
-		return nil, fmt.Errorf("parse documents html: %w", err)
+		return nil, fmt.Errorf("parse pricereq documents html: %w", err)
 	}
 
 	seen := make(map[string]struct{})
 	var out []models.DocumentFile
 
-	doc.Find(`a[href*="filestore"][href*="uid="]`).Each(func(_ int, a *goquery.Selection) {
+	doc.Find(`a[href]`).Each(func(_ int, a *goquery.Selection) {
 		href, ok := a.Attr("href")
 		if !ok || href == "" {
 			return
 		}
 		low := strings.ToLower(href)
-		if strings.Contains(low, "signview") || strings.Contains(low, "crypto") {
+		if !strings.Contains(low, "filestore") || !strings.Contains(low, "uid=") {
 			return
 		}
-		// часть ссылок без /download/ — всё равно filestore+uid
-		if !strings.Contains(low, "download") && !strings.Contains(low, "file.html") && !strings.Contains(low, "get.html") {
-			// keep if clearly filestore download endpoint variants
-			if !strings.Contains(low, "filestore") {
-				return
-			}
+		if strings.Contains(low, "signview") || strings.Contains(low, "crypto") || strings.Contains(low, "javascript:") {
+			return
 		}
 		abs := href
 		if strings.HasPrefix(href, "/") {
@@ -65,7 +62,6 @@ func ParseDocumentsHTML(html []byte) ([]models.DocumentFile, error) {
 		}
 
 		extHint := ""
-		// иконка типа рядом со ссылкой (docx.svg / pdf.svg)
 		a.Parent().Find("img[src*='icons/type'], img[alt]").Each(func(_ int, img *goquery.Selection) {
 			if extHint != "" {
 				return
@@ -79,31 +75,31 @@ func ParseDocumentsHTML(html []byte) ([]models.DocumentFile, error) {
 				}
 			}
 		})
-		// запасной поиск в ближайшем блоке строки
 		if extHint == "" {
-			row := a.Closest("tr, .attachment, .noticeDocsPad, .blockInfo__section")
-			row.Find("img[src*='icons/type']").Each(func(_ int, img *goquery.Selection) {
+			row := a.Closest("tr, .attachment, .noticeDocsPad, .blockInfo__section, li, .card-attachments")
+			row.Find("img[src*='icons/type'], img[alt]").Each(func(_ int, img *goquery.Selection) {
 				if extHint != "" {
 					return
 				}
 				if src, ok := img.Attr("src"); ok {
 					extHint = filemeta.ExtFromIconSrc(src)
 				}
+				if extHint == "" {
+					if alt, ok := img.Attr("alt"); ok {
+						extHint = filemeta.ExtFromAlt(alt)
+					}
+				}
 			})
 		}
 		name = filemeta.EnsureExt(sanitizeFilename(name), extHint, "")
 
-		group := ""
+		group := "Прикрепленные файлы"
 		edition := ""
 		block := a.Closest(".notice-documents, .blockInfo__section, .blockInfo")
 		if block.Length() > 0 {
-			group = textutil.CleanSpace(block.Closest(".blockInfo").Find("h2.blockInfo__title").First().Text())
-			block.Find(".section__attrib, .section__value").Each(func(_ int, s *goquery.Selection) {
-				t := textutil.CleanSpace(s.Text())
-				if strings.Contains(t, "Действующая") || strings.Contains(t, "Недействующая") {
-					edition = t
-				}
-			})
+			if t := textutil.CleanSpace(block.Closest(".blockInfo").Find("h2.blockInfo__title").First().Text()); t != "" {
+				group = t
+			}
 		}
 
 		out = append(out, models.DocumentFile{
@@ -123,12 +119,9 @@ func uidFromURL(raw string) string {
 	if err != nil {
 		return ""
 	}
-	q := u.Query().Get("uid")
-	if q != "" {
+	if q := u.Query().Get("uid"); q != "" {
 		return strings.ToUpper(q)
 	}
-	// fallback path
-	base := path.Base(u.Path)
 	if strings.Contains(strings.ToLower(raw), "uid=") {
 		parts := strings.Split(raw, "uid=")
 		if len(parts) > 1 {
@@ -139,7 +132,7 @@ func uidFromURL(raw string) string {
 			return strings.ToUpper(id)
 		}
 	}
-	_ = base
+	_ = path.Base(u.Path)
 	return ""
 }
 

@@ -47,6 +47,50 @@ func Extract(archivePath, destDir string) ([]string, error) {
 	}
 }
 
+// ExtractRecursive распаковывает архив и вложенные архивы до maxDepth (включительно с корнем).
+// Возвращает абсолютные пути листовых файлов (не архивов).
+func ExtractRecursive(archivePath, destDir string, maxDepth int) ([]string, error) {
+	if maxDepth <= 0 {
+		maxDepth = 5
+	}
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return nil, err
+	}
+	first, err := Extract(archivePath, destDir)
+	if err != nil {
+		return nil, err
+	}
+	var queue []string
+	for _, rel := range first {
+		queue = append(queue, filepath.Join(destDir, rel))
+	}
+	var leaves []string
+	for depth := 0; depth < maxDepth && len(queue) > 0; depth++ {
+		var next []string
+		for _, p := range queue {
+			if IsArchive(p) {
+				sub := filepath.Join(filepath.Dir(p), strings.TrimSuffix(filepath.Base(p), filepath.Ext(p))+"_unpacked")
+				_ = os.MkdirAll(sub, 0o755)
+				inner, err := Extract(p, sub)
+				_ = os.Remove(p)
+				if err != nil {
+					leaves = append(leaves, p) // оставим архив как есть — вызывающий отметит ошибку
+					continue
+				}
+				for _, rel := range inner {
+					next = append(next, filepath.Join(sub, rel))
+				}
+				continue
+			}
+			leaves = append(leaves, p)
+		}
+		queue = next
+	}
+	// всё, что осталось в queue после maxDepth — тоже листья (в т.ч. архивы)
+	leaves = append(leaves, queue...)
+	return leaves, nil
+}
+
 func extractZip(archivePath, destDir string) ([]string, error) {
 	r, err := zip.OpenReader(archivePath)
 	if err != nil {

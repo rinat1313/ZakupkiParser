@@ -42,7 +42,16 @@ Search results → Notice → Documents (download) → Events
   html/         — сырые HTML страниц
   valid_info/   — tender.json, customer.json, files.json, export.json (+ lots.json для 223)
   over_info/    — texts.json, failed_texts.json, error.json
+  analysis/     — раздел AI-анализа (микросервис analizator_zakupok → analysis.json)
 
+
+АНАЛИЗАТОР (отдельный сервис)
+-----------------------------
+Репозиторий/модуль: ../analizator_zakupok (github.com/rinat1313/analizator_zakupok)
+Docker: корневой docker-compose.yml поднимает analizator + postgres рядом с парсером.
+После выгрузки: go run ./cmd/parser -analyze-url http://127.0.0.1:8088
+Или POST /api/v1/analyze {"reg_number":"…"}.
+LM Studio: OpenAI-compatible http://127.0.0.1:1234/v1/chat/completions.
 
 
 БИБЛИОТЕКИ (РЕКОМЕНДАЦИЯ)

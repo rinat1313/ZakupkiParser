@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,8 +52,10 @@ func main() {
 		limit      = flag.Int("limit", 0, "обработать только первые N номеров (0 = все)")
 		workers    = flag.Int("workers", 1, "параллельных загрузок (1 рекомендуется; макс. 5)")
 		retries    = flag.Int("retries", 5, "повторов при ошибке поиска/детекта одной закупки")
-		resultDir  = flag.String("result", "result", "корневая папка выгрузки")
-		outPath    = flag.String("o", "", "дополнительно записать сводный JSON-массив")
+		resultDir   = flag.String("result", "result", "корневая папка выгрузки")
+		outPath     = flag.String("o", "", "дополнительно записать сводный JSON-массив")
+		analyzeURL  = flag.String("analyze-url", "", "URL analizator_zakupok (например http://127.0.0.1:8088); после успешной выгрузки вызвать /api/v1/analyze")
+		checklistID = flag.String("checklist", "default", "id чек-листа для -analyze-url")
 	)
 	flag.Parse()
 
@@ -196,6 +201,13 @@ func main() {
 				if len(exp.FailedTexts) > 0 {
 					logf("  [%s] failed_texts: %d\n", usedID, len(exp.FailedTexts))
 				}
+				if *analyzeURL != "" {
+					if err := callAnalizator(*analyzeURL, usedID, *checklistID); err != nil {
+						logf("  [%s] analyze warn: %v\n", usedID, err)
+					} else {
+						logf("  [%s] analyze OK → %s/analysis/\n", usedID, usedID)
+					}
+				}
 				jr.exp = exp
 			}
 			results[i] = jr
@@ -261,6 +273,37 @@ func exportOne(client *eis.Client, id, lawForRow string, opt store.Options) (*mo
 	default:
 		return store.ExportAuto(client, id, opt)
 	}
+}
+
+// callAnalizator дергает микросервис analizator_zakupok после выгрузки тендера.
+func callAnalizator(baseURL, regNumber, checklistID string) error {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if baseURL == "" || regNumber == "" {
+		return fmt.Errorf("analyze-url and reg_number required")
+	}
+	body, _ := json.Marshal(map[string]string{
+		"reg_number":   regNumber,
+		"checklist_id": checklistID,
+	})
+	client := &http.Client{Timeout: 30 * time.Minute}
+	resp, err := client.Post(baseURL+"/api/v1/analyze", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var parsed struct {
+		Status string `json:"status"`
+		Error  string `json:"error"`
+	}
+	_ = json.Unmarshal(raw, &parsed)
+	if parsed.Status == "failed" {
+		return fmt.Errorf("analysis failed: %s", parsed.Error)
+	}
+	return nil
 }
 
 func printOKLocked(mu *sync.Mutex, exp *models.TenderExport) {

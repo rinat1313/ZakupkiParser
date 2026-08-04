@@ -26,6 +26,7 @@ const (
 	DirHTML      = "html"       // оригинальные HTML страницы
 	DirValidInfo = "valid_info" // JSON для LLM
 	DirOverInfo  = "over_info"  // прочая информация
+	DirAnalysis  = "analysis"   // раздел AI-анализа (analizator_zakupok)
 )
 
 // Options настройки выгрузки одного тендера.
@@ -47,6 +48,7 @@ type tenderDirs struct {
 	html      string
 	validInfo string
 	overInfo  string
+	analysis  string
 }
 
 func prepareDirs(root, regNumber string) (tenderDirs, error) {
@@ -58,8 +60,9 @@ func prepareDirs(root, regNumber string) (tenderDirs, error) {
 		html:      filepath.Join(base, DirHTML),
 		validInfo: filepath.Join(base, DirValidInfo),
 		overInfo:  filepath.Join(base, DirOverInfo),
+		analysis:  filepath.Join(base, DirAnalysis),
 	}
-	for _, p := range []string{d.origin, d.validDoc, d.html, d.validInfo, d.overInfo} {
+	for _, p := range []string{d.origin, d.validDoc, d.html, d.validInfo, d.overInfo, d.analysis} {
 		if err := os.MkdirAll(p, 0o755); err != nil {
 			return d, err
 		}

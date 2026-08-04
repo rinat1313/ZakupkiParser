@@ -25,6 +25,8 @@
 ├── over/           # опыт других (статьи, заметки по парсингу)
 ├── result/         # руководства по парсингу (txt)
 ├── DataCode/       # ВЕСЬ код Go-парсера и data/tenders.csv — только здесь
+├── analizator_zakupok/  # AI-микросервис анализа (LM Studio); отдельный модуль/репозиторий
+├── docker-compose.yml   # postgres + analizator (+ profile parser)
 ├── TASK.txt        # текущее задание
 └── cursor/rules/   # правила для AI-агента
 ```
@@ -83,8 +85,40 @@ bash DataCode/scripts/eis_curl/02_notice44.sh
 
 ```
 поиск / номер → карточка извещения → документы (filestore) → организация
-             → (опционально) журнал / итоги / лоты 223 → СУБД → анализ
+             → (опционально) журнал / итоги / лоты 223 → СУБД / result/ → анализ
 ```
+
+### AI-анализ (`analizator_zakupok`)
+
+Отдельный Go-микросервис в каталоге [`analizator_zakupok/`](analizator_zakupok/)  
+(целевой GitHub-репозиторий: `rinat1313/analizator_zakupok`).
+
+Он читает `DataCode/result/{reg}/`, режет большие тексты на фрагменты, вызывает **LM Studio**
+(`POST /v1/chat/completions`) по чек-листам и пишет раздел:
+
+```
+result/{reg}/analysis/analysis.json
+result/{reg}/valid_info/analysis.json   # дубль
+```
+
+Совместный запуск:
+
+```bash
+# LM Studio Local Server на :1234
+docker compose up -d --build
+curl -X POST http://127.0.0.1:8088/api/v1/analyze \
+  -H 'Content-Type: application/json' \
+  -d '{"reg_number":"<номер>"}'
+```
+
+Парсер может сам дернуть анализ после выгрузки:
+
+```bash
+cd DataCode
+go run ./cmd/parser -limit 1 -analyze-url http://127.0.0.1:8088
+```
+
+Подробности: [`analizator_zakupok/README.md`](analizator_zakupok/README.md).
 
 Пример URL (44-ФЗ):
 

@@ -8,6 +8,7 @@
 # Go
 DataCode/bin/
 DataCode/dist/
+analizator_zakupok/bin/
 *.exe
 *.test
 *.out
@@ -25,6 +26,9 @@ DataCode/result/
 # Env / secrets
 .env
 .env.*
+!.env.example
+!**/.env.example
+!**/.env.lan.example
 *.pem
 *.key
 

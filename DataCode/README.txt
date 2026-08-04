@@ -57,13 +57,17 @@ go run ./cmd/extract -id 32312323655
 go run ./cmd/parser -fixture "../html/44 фз/Сведения закупки 44 фз.html"
 go run ./cmd/parser -law 223 -fixture "../html/223 фз/Карточка закупки 223 фз.html"
 
+# после выгрузки — AI-анализ (нужен запущенный analizator_zakupok + LM Studio):
+go run ./cmd/parser -limit 1 -analyze-url http://127.0.0.1:8088
+go run ./cmd/parser -limit 1 -analyze-url http://127.0.0.1:8088 -checklist quick
+
 go test ./internal/parser/fz44/ ./internal/parser/fz223/ ./internal/extract/ ./internal/detect/
 
 
 
 НЕ ДЕЛАТЬ
 ---------
-- Писать Go/код вне DataCode/
+- Писать Go/код парсера вне DataCode/ (AI-анализатор — исключение: ../analizator_zakupok/)
 - Один парсер на 44 и 223 с общими CSS-селекторами
 - Менять файлы в html/ и over/
 - Хардкодить только ea20 — брать href из поиска

@@ -32,7 +32,7 @@ func ParseDocumentsHTML(html []byte) ([]models.DocumentFile, error) {
 		if !ok || href == "" {
 			return
 		}
-		if !strings.Contains(href, "download") {
+		if strings.Contains(strings.ToLower(href), "signview") || strings.Contains(strings.ToLower(href), "crypto") {
 			return
 		}
 		abs := href

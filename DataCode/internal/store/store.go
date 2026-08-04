@@ -548,20 +548,20 @@ func downloadOne(client *eis.Client, doc models.DocumentFile, d tenderDirs) mode
 
 	if archiveutil.IsArchive(dest) {
 		extractDir := filepath.Join(d.origin, strings.TrimSuffix(filepath.Base(dest), filepath.Ext(dest)))
-		extracted, err := archiveutil.Extract(dest, extractDir)
+		leaves, err := archiveutil.ExtractRecursive(dest, extractDir, 6)
 		if err != nil {
 			sf.Error = "extract: " + err.Error()
 			return sf
 		}
-		baseRel := filepath.Join(DirOrigin, filepath.Base(extractDir))
-		for _, e := range extracted {
-			sf.Extracted = append(sf.Extracted, filepath.Join(baseRel, e))
-		}
-		if err := os.Remove(dest); err != nil {
-			sf.Error = "remove archive: " + err.Error()
-		} else {
-			sf.ArchiveRemoved = true
-			sf.LocalPath = ""
+		_ = os.Remove(dest)
+		sf.ArchiveRemoved = true
+		sf.LocalPath = ""
+		for _, leaf := range leaves {
+			if rel, err := filepath.Rel(d.root, leaf); err == nil {
+				sf.Extracted = append(sf.Extracted, rel)
+			} else {
+				sf.Extracted = append(sf.Extracted, leaf)
+			}
 		}
 	}
 	return sf

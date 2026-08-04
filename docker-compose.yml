@@ -51,8 +51,10 @@ services:
       CHUNK_OVERLAP: "250"
       MAX_CHUNKS: "40"
       CONCURRENCY: "2"
+      PROMPTS_DIR: /app/configs/prompts
     volumes:
       - ./DataCode/result:/data/tenders
+      - ./analizator_zakupok/configs:/app/configs:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

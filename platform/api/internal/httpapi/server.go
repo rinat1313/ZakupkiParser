@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"zakupkiplatform/internal/analizator"
 	"zakupkiplatform/internal/db"
 	"zakupkiplatform/internal/ingest"
 
@@ -14,12 +15,13 @@ import (
 )
 
 type Server struct {
-	Store *db.Store
-	Mux   *http.ServeMux
+	Store      *db.Store
+	Analizator *analizator.Client
+	Mux        *http.ServeMux
 }
 
-func New(store *db.Store) *Server {
-	s := &Server{Store: store, Mux: http.NewServeMux()}
+func New(store *db.Store, az *analizator.Client) *Server {
+	s := &Server{Store: store, Analizator: az, Mux: http.NewServeMux()}
 	s.routes()
 	return s
 }
@@ -49,6 +51,7 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/tenders/{id}/events", s.listEvents)
 	s.Mux.HandleFunc("GET /api/v1/tenders/{id}/assessment", s.getAssessment)
 	s.Mux.HandleFunc("PUT /api/v1/tenders/{id}/assessment", s.putAssessment)
+	s.Mux.HandleFunc("POST /api/v1/tenders/{id}/analyze", s.analyzeTender)
 
 	s.Mux.HandleFunc("GET /api/v1/customers", s.listCustomers)
 	s.Mux.HandleFunc("GET /api/v1/customers/{id}", s.getCustomer)
@@ -60,8 +63,20 @@ func (s *Server) routes() {
 	s.Mux.HandleFunc("GET /api/v1/customers/{id}/rnp", s.stubList)
 }
 
-func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+func (s *Server) health(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{"status": "ok"}
+	if s.Analizator != nil && s.Analizator.Enabled() {
+		out["analizator_url"] = s.Analizator.BaseURL
+		if err := s.Analizator.Ping(r.Context()); err != nil {
+			out["analizator"] = "unavailable"
+			out["analizator_error"] = err.Error()
+		} else {
+			out["analizator"] = "ok"
+		}
+	} else {
+		out["analizator"] = "disabled"
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) listCategories(w http.ResponseWriter, r *http.Request) {
@@ -401,6 +416,86 @@ func (s *Server) putAssessment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, a)
+}
+
+func (s *Server) analyzeTender(w http.ResponseWriter, r *http.Request) {
+	if s.Analizator == nil || !s.Analizator.Enabled() {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "analizator disabled: set ANALIZATOR_URL",
+		})
+		return
+	}
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	var body struct {
+		ChecklistID string `json:"checklist_id"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	t, err := s.Store.GetTender(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	docs, err := s.Store.ListDocuments(r.Context(), id, true)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	texts := make([]string, 0, len(docs))
+	for _, d := range docs {
+		if d.TextContent != nil && strings.TrimSpace(*d.TextContent) != "" {
+			texts = append(texts, *d.TextContent)
+		}
+	}
+	corpus := analizator.BuildCorpus(t.ObjectName, t.Law, t.Status, t.NMCK, texts)
+	if corpus == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error": "нет текста для анализа: сначала загрузите карточку/документы",
+		})
+		return
+	}
+
+	res, err := s.Analizator.Analyze(r.Context(), analizator.AnalyzeRequest{
+		RegNumber:   t.RegNumber,
+		Text:        corpus,
+		ChecklistID: body.ChecklistID,
+		Title:       t.ObjectName,
+	})
+	if err != nil {
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": err.Error()})
+		return
+	}
+
+	score := res.Score
+	summary := res.Summary
+	if summary == "" && res.Recommendation != "" {
+		summary = "recommendation: " + res.Recommendation
+	}
+	if res.Error != "" && summary == "" {
+		summary = res.Error
+	}
+	a, err := s.Store.UpsertAssessment(r.Context(), db.Assessment{
+		TenderID: id,
+		Summary:  summary,
+		Score:    &score,
+		Details:  analizator.AssessmentDetails(res),
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if res.Status == "failed" {
+		_, _ = s.Store.UpdateTender(r.Context(), id, map[string]any{"analysis_status": "other"})
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"assessment": a,
+		"analizator": res,
+	})
 }
 
 func (s *Server) listCustomers(w http.ResponseWriter, r *http.Request) {

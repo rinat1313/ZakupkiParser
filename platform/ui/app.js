@@ -414,6 +414,30 @@ $("#tender-refresh").addEventListener("click", async () => {
   openJob(job.id);
 });
 
+$("#tender-analyze").addEventListener("click", async () => {
+  if (!state.currentTenderId) return;
+  const btn = $("#tender-analyze");
+  const prev = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Анализ…";
+  try {
+    const res = await api(`/tenders/${state.currentTenderId}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ checklist_id: "default" }),
+    });
+    const rec = res.analizator && res.analizator.recommendation;
+    alert(rec ? `Готово: ${rec}` : "Анализ сохранён");
+    await openTender(state.currentTenderId);
+    renderCatalog();
+  } catch (err) {
+    alert("AI-анализ: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+});
+
 setInterval(async () => {
   try {
     await refreshAll();

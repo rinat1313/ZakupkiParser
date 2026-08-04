@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"eisparser/pkg/collect"
+	"zakupkiplatform/internal/analizator"
 	"zakupkiplatform/internal/db"
 	"zakupkiplatform/internal/httpapi"
 	"zakupkiplatform/internal/ingest"
@@ -32,7 +33,6 @@ func main() {
 	} else if n > 0 {
 		log.Printf("requeued %d stuck running ingest items", n)
 	}
-	srv := httpapi.New(store)
 
 	col := collect.New(true)
 	if col.Client != nil && col.Client.HTTP != nil {
@@ -41,6 +41,14 @@ func main() {
 	pipe := &sources.Pipeline{EIS: col}
 	w := &ingest.Worker{Store: store, Pipeline: pipe, Log: log.Default()}
 	go w.Run(ctx)
+
+	az := analizator.New(os.Getenv("ANALIZATOR_URL"))
+	if az.Enabled() {
+		log.Printf("analizator bridge: %s", az.BaseURL)
+	} else {
+		log.Printf("analizator bridge: disabled (set ANALIZATOR_URL to enable)")
+	}
+	srv := httpapi.New(store, az)
 
 	addr := os.Getenv("HTTP_ADDR")
 	if addr == "" {

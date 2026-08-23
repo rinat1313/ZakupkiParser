@@ -1,0 +1,64 @@
+// RequeueStuckAnalyzing — после рестарта core вернуть «зависшие» analyzing → none.
+func (s *Store) RequeueStuckAnalyzing(ctx context.Context) (int64, error) {
+	tag, err := s.Pool.Exec(ctx, `UPDATE tenders SET analysis_status='none', updated_at=now() WHERE analysis_status='analyzing'`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// RequeueStuckAnalyzingOlderThan — вернуть analyzing старше age → none (без рестарта).
+// Не трогает свежие analyzing (идёт живой LLM-запрос).
+func (s *Store) RequeueStuckAnalyzingOlderThan(ctx context.Context, age time.Duration) (int64, error) {
+	if age <= 0 {
+		age = 15 * time.Minute
+	}
+	secs := age.Seconds()
+	tag, err := s.Pool.Exec(ctx, `
+		UPDATE tenders
+		SET analysis_status='none', updated_at=now()
+		WHERE analysis_status='analyzing'
+		  AND updated_at < now() - make_interval(secs => $1::double precision)`, secs)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+// RequeueFailedAnalyses — вернуть failed («other») в очередь Auto-AI, если есть текст документов.
+// Без этого после сбоя LMS/analizator карточки навсегда выпадают из NextTenderReadyForAI,
+// хотя UI по-прежнему считает их eligible.
+func (s *Store) RequeueFailedAnalyses(ctx context.Context) (int64, error) {
+	return s.RequeueFailedAnalysesOlderThan(ctx, 0)
+}
+
+// RequeueFailedAnalysesOlderThan — как RequeueFailedAnalyses, но только для other старше age.
+// age<=0 означает «любой возраст» (рестарт / ручное включение auto).
+func (s *Store) RequeueFailedAnalysesOlderThan(ctx context.Context, age time.Duration) (int64, error) {
+	base := `
+		UPDATE tenders t
+		SET analysis_status='none', updated_at=now()
+		WHERE t.analysis_status = 'other'
+		  AND EXISTS (
+		    SELECT 1 FROM documents d
+		    WHERE d.tender_id=t.id AND NOT d.removed
+		      AND d.text_content IS NOT NULL AND length(trim(d.text_content))>0
+		  )`
+	var (
+		tag interface{ RowsAffected() int64 }
+		err error
+	)
+	if age > 0 {
+		t, e := s.Pool.Exec(ctx, base+`
+		  AND t.updated_at < now() - make_interval(secs => $1::double precision)`, age.Seconds())
+		tag, err = t, e
+	} else {
+		t, e := s.Pool.Exec(ctx, base)
+		tag, err = t, e
+	}
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+

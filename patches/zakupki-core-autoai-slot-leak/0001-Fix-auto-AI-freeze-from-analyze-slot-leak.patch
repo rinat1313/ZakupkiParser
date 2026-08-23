@@ -1,0 +1,340 @@
+From b7af13b0281aeb40dbd95e669171f9d8d2a39c8e Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Sun, 23 Aug 2026 23:44:18 +0000
+Subject: [PATCH] Fix auto-AI freeze from analyze slot leak
+
+Defer the pre-held analyze slot release before any early return in
+AnalyzeTender so FreeAnalyzeSlots cannot stay at 0 after ListDocuments
+or empty-corpus failures. Periodically requeue stuck analyzing and old
+failed (other) cards with document text, and return transient LLM
+errors to none so auto mode keeps draining ready cards.
+---
+ internal/autoai/worker.go        | 58 +++++++++++++++++++----
+ internal/autoai/worker_test.go   | 80 ++++++++++++++++++++++++++++++++
+ internal/control/control_test.go | 36 ++++++++++++++
+ internal/store/tenders.go        | 55 ++++++++++++++++++++++
+ 4 files changed, 221 insertions(+), 8 deletions(-)
+ create mode 100644 internal/autoai/worker_test.go
+ create mode 100644 internal/control/control_test.go
+
+diff --git a/internal/autoai/worker.go b/internal/autoai/worker.go
+index 17ab626..bc1bac7 100644
+--- a/internal/autoai/worker.go
++++ b/internal/autoai/worker.go
+@@ -15,6 +15,10 @@ import (
+ 	"github.com/rinat1313/zakupki-core/internal/store"
+ )
+ 
++// stuckAnalyzingAge — карточки в analyzing дольше этого считаются зависшими
++// (HTTP-таймаут Analyze = 10m; запас на горутину/сеть).
++const stuckAnalyzingAge = 15 * time.Minute
++
+ // Worker периодически берёт готовые карточки и шлёт в analizator, если auto_ai включён.
+ type Worker struct {
+ 	Store      *store.Store
+@@ -22,6 +26,8 @@ type Worker struct {
+ 	Analizator *analizator.Client
+ 	Log        *log.Logger
+ 	Interval   time.Duration
++
++	lastStuckSweep time.Time
+ }
+ 
+ func (w *Worker) Run(ctx context.Context) {
+@@ -56,6 +62,24 @@ func (w *Worker) tick(ctx context.Context) {
+ 	if !globalOn && !catOn {
+ 		return
+ 	}
++
++	// Периодически возвращаем «зависшие» analyzing → none и старые failed(other) с текстом → none,
++	// чтобы auto-AI не останавливался после утечки слота / обрыва / временного сбоя LLM.
++	if time.Since(w.lastStuckSweep) >= time.Minute {
++		w.lastStuckSweep = time.Now()
++		if n, err := w.Store.RequeueStuckAnalyzingOlderThan(ctx, stuckAnalyzingAge); err != nil {
++			w.Log.Printf("auto-ai: requeue stuck analyzing: %v", err)
++		} else if n > 0 {
++			w.Log.Printf("auto-ai: requeued %d stuck analyzing tender(s)", n)
++		}
++		// other с текстом — реже, чтобы не крутить вечный fail-loop каждую минуту.
++		if n, err := w.Store.RequeueFailedAnalysesOlderThan(ctx, stuckAnalyzingAge); err != nil {
++			w.Log.Printf("auto-ai: requeue failed analyses: %v", err)
++		} else if n > 0 {
++			w.Log.Printf("auto-ai: requeued %d failed (other) tender(s) → none", n)
++		}
++	}
++
+ 	free := w.Control.FreeAnalyzeSlots()
+ 	if free <= 0 {
+ 		return
+@@ -103,13 +127,32 @@ type AnalyzeOptions struct {
+ 
+ // AnalyzeTender — общая логика ручного и авто-анализа.
+ func AnalyzeTender(ctx context.Context, st *store.Store, ctrl *control.Controller, az *analizator.Client, t *store.Tender, opt *AnalyzeOptions) error {
++	var (
++		analyzeCtx context.Context
++		release    func()
++		slotHeld   bool
++	)
++
++	// Если слот уже занят снаружи (auto-AI), release обязан вызваться на любом early-return.
++	// Раньше defer стоял ниже ListDocuments / пустого корпуса → утечка слота и «заморозка» auto-AI.
++	if opt != nil && opt.PreCtx != nil && opt.Release != nil {
++		analyzeCtx = opt.PreCtx
++		release = opt.Release
++		slotHeld = true
++		defer release()
++	}
++
+ 	docs, err := st.ListDocuments(ctx, t.ID, true)
+ 	if err != nil {
++		_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "none"})
+ 		return err
+ 	}
+ 	texts := make([]string, 0, len(docs))
+ 	var names []string
+ 	for _, d := range docs {
++		if d.Removed {
++			continue
++		}
+ 		if d.TextContent != nil && strings.TrimSpace(*d.TextContent) != "" {
+ 			label := d.Filename
+ 			if label == "" {
+@@ -148,19 +191,15 @@ func AnalyzeTender(ctx context.Context, st *store.Store, ctrl *control.Controlle
+ 	_, _ = st.RetainTender(ctx, t.ID, store.RetainReasonAnalyzing)
+ 	_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "analyzing"})
+ 
+-	var analyzeCtx context.Context
+-	var release func()
+-	if opt != nil && opt.PreCtx != nil && opt.Release != nil {
+-		analyzeCtx = opt.PreCtx
+-		release = opt.Release
+-	} else {
++	if !slotHeld {
+ 		var ok bool
+ 		analyzeCtx, release, ok = ctrl.BeginAnalyze(ctx)
+ 		if !ok {
++			_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "none"})
+ 			return errBusy
+ 		}
++		defer release()
+ 	}
+-	defer release()
+ 
+ 	req := analizator.AnalyzeRequest{
+ 		RegNumber:  t.RegNumber,
+@@ -215,7 +254,9 @@ func AnalyzeTender(ctx context.Context, st *store.Store, ctrl *control.Controlle
+ 			_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "none"})
+ 			return analyzeCtx.Err()
+ 		}
+-		_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "other"})
++		// Временные сбои LLM/сети — вернуть в очередь auto-AI (none), а не «other»,
++		// иначе карточка навсегда выпадает из NextTenderReadyForAI при включённом auto.
++		_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "none"})
+ 		return err
+ 	}
+ 
+@@ -237,6 +278,7 @@ func AnalyzeTender(ctx context.Context, st *store.Store, ctrl *control.Controlle
+ 		Details:  analizator.AssessmentDetails(res),
+ 	})
+ 	if err != nil {
++		_, _ = st.UpdateTender(ctx, t.ID, map[string]any{"analysis_status": "none"})
+ 		return err
+ 	}
+ 	stStatus := "analyzed"
+diff --git a/internal/autoai/worker_test.go b/internal/autoai/worker_test.go
+new file mode 100644
+index 0000000..d8f412b
+--- /dev/null
++++ b/internal/autoai/worker_test.go
+@@ -0,0 +1,80 @@
++package autoai
++
++import (
++	"context"
++	"sync/atomic"
++	"testing"
++
++	"github.com/rinat1313/zakupki-core/internal/control"
++)
++
++// TestPreheldSlotMustReleaseEvenOnEarlyReturn фиксирует контракт auto-AI:
++// BeginAnalyze в tick() + Release в AnalyzeOptions обязан освобождаться
++// даже если AnalyzeTender выходит до вызова LLM (иначе FreeAnalyzeSlots=0 навсегда).
++func TestPreheldSlotMustReleaseEvenOnEarlyReturn(t *testing.T) {
++	ctrl := control.New()
++	ctrl.SetAnalyzeCapacity(1)
++
++	ctx, release, ok := ctrl.BeginAnalyze(context.Background())
++	if !ok {
++		t.Fatal("BeginAnalyze failed")
++	}
++	if ctrl.FreeAnalyzeSlots() != 0 {
++		t.Fatalf("expected 0 free slots while held, got %d", ctrl.FreeAnalyzeSlots())
++	}
++
++	// Имитация исправленного AnalyzeTender: defer release ДО любой ранней ошибки.
++	err := func() error {
++		defer release()
++		_ = ctx
++		return errNoText // early return path (пустой корпус / ListDocuments)
++	}()
++	if err == nil {
++		t.Fatal("expected early error")
++	}
++
++	if ctrl.FreeAnalyzeSlots() != 1 {
++		t.Fatalf("slot leak: free=%d active=%d (auto-AI would freeze)", ctrl.FreeAnalyzeSlots(), ctrl.AnalyzeActiveCount())
++	}
++	if ctrl.AnalyzeActive() {
++		t.Fatal("analyze still marked active after release")
++	}
++}
++
++func TestReleaseIsIdempotent(t *testing.T) {
++	ctrl := control.New()
++	ctrl.SetAnalyzeCapacity(1)
++	_, release, ok := ctrl.BeginAnalyze(context.Background())
++	if !ok {
++		t.Fatal("BeginAnalyze failed")
++	}
++	release()
++	release() // sync.Once — не должно увести active в минус без восстановления
++	if ctrl.FreeAnalyzeSlots() != 1 {
++		t.Fatalf("free=%d after double release", ctrl.FreeAnalyzeSlots())
++	}
++}
++
++func TestWorkerDoesNotClaimWhenNoFreeSlots(t *testing.T) {
++	ctrl := control.New()
++	ctrl.SetAnalyzeCapacity(1)
++	_, release, ok := ctrl.BeginAnalyze(context.Background())
++	if !ok {
++		t.Fatal("BeginAnalyze failed")
++	}
++
++	var claimed atomic.Int32
++	// Как tick(): при free<=0 новых claim нет.
++	free := ctrl.FreeAnalyzeSlots()
++	if free > 0 {
++		claimed.Add(1)
++	}
++	if claimed.Load() != 0 {
++		t.Fatal("must not claim when slots exhausted")
++	}
++
++	release()
++	if ctrl.FreeAnalyzeSlots() != 1 {
++		t.Fatal("slot not freed")
++	}
++}
+diff --git a/internal/control/control_test.go b/internal/control/control_test.go
+new file mode 100644
+index 0000000..6245fc6
+--- /dev/null
++++ b/internal/control/control_test.go
+@@ -0,0 +1,36 @@
++package control
++
++import (
++	"context"
++	"testing"
++)
++
++func TestFreeAnalyzeSlotsAfterRelease(t *testing.T) {
++	c := New()
++	c.SetAnalyzeCapacity(2)
++
++	_, r1, ok := c.BeginAnalyze(context.Background())
++	if !ok {
++		t.Fatal("first BeginAnalyze")
++	}
++	_, r2, ok := c.BeginAnalyze(context.Background())
++	if !ok {
++		t.Fatal("second BeginAnalyze")
++	}
++	if c.FreeAnalyzeSlots() != 0 {
++		t.Fatalf("free=%d", c.FreeAnalyzeSlots())
++	}
++	_, _, ok = c.BeginAnalyze(context.Background())
++	if ok {
++		t.Fatal("third BeginAnalyze must fail at capacity")
++	}
++
++	r1()
++	if c.FreeAnalyzeSlots() != 1 {
++		t.Fatalf("after r1 free=%d", c.FreeAnalyzeSlots())
++	}
++	r2()
++	if c.FreeAnalyzeSlots() != 2 {
++		t.Fatalf("after r2 free=%d", c.FreeAnalyzeSlots())
++	}
++}
+diff --git a/internal/store/tenders.go b/internal/store/tenders.go
+index 1f42c51..e87040c 100644
+--- a/internal/store/tenders.go
++++ b/internal/store/tenders.go
+@@ -249,6 +249,61 @@ func (s *Store) RequeueStuckAnalyzing(ctx context.Context) (int64, error) {
+ 	return tag.RowsAffected(), nil
+ }
+ 
++// RequeueStuckAnalyzingOlderThan — вернуть analyzing старше age → none (без рестарта).
++// Не трогает свежие analyzing (идёт живой LLM-запрос).
++func (s *Store) RequeueStuckAnalyzingOlderThan(ctx context.Context, age time.Duration) (int64, error) {
++	if age <= 0 {
++		age = 15 * time.Minute
++	}
++	secs := age.Seconds()
++	tag, err := s.Pool.Exec(ctx, `
++		UPDATE tenders
++		SET analysis_status='none', updated_at=now()
++		WHERE analysis_status='analyzing'
++		  AND updated_at < now() - make_interval(secs => $1::double precision)`, secs)
++	if err != nil {
++		return 0, err
++	}
++	return tag.RowsAffected(), nil
++}
++
++// RequeueFailedAnalyses — вернуть failed («other») в очередь Auto-AI, если есть текст документов.
++// Без этого после сбоя LMS/analizator карточки навсегда выпадают из NextTenderReadyForAI,
++// хотя UI по-прежнему считает их eligible.
++func (s *Store) RequeueFailedAnalyses(ctx context.Context) (int64, error) {
++	return s.RequeueFailedAnalysesOlderThan(ctx, 0)
++}
++
++// RequeueFailedAnalysesOlderThan — как RequeueFailedAnalyses, но только для other старше age.
++// age<=0 означает «любой возраст» (рестарт / ручное включение auto).
++func (s *Store) RequeueFailedAnalysesOlderThan(ctx context.Context, age time.Duration) (int64, error) {
++	base := `
++		UPDATE tenders t
++		SET analysis_status='none', updated_at=now()
++		WHERE t.analysis_status = 'other'
++		  AND EXISTS (
++		    SELECT 1 FROM documents d
++		    WHERE d.tender_id=t.id AND NOT d.removed
++		      AND d.text_content IS NOT NULL AND length(trim(d.text_content))>0
++		  )`
++	var (
++		tag interface{ RowsAffected() int64 }
++		err error
++	)
++	if age > 0 {
++		t, e := s.Pool.Exec(ctx, base+`
++		  AND t.updated_at < now() - make_interval(secs => $1::double precision)`, age.Seconds())
++		tag, err = t, e
++	} else {
++		t, e := s.Pool.Exec(ctx, base)
++		tag, err = t, e
++	}
++	if err != nil {
++		return 0, err
++	}
++	return tag.RowsAffected(), nil
++}
++
+ // EnrichTenderUI заполняет прогресс/тон для одной карточки (модалка).
+ func (s *Store) EnrichTenderUI(ctx context.Context, t *Tender) error {
+ 	err := s.Pool.QueryRow(ctx, `
+-- 
+2.43.0
+
